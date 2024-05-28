@@ -1,0 +1,260 @@
+#include <DS1307RTC.h>
+#include <LiquidCrystal.h>
+#include <Keypad.h>
+#include <Wire.h>
+#include <TimeLib.h>
+
+LiquidCrystal lcd(A0, A1, A2, 11, 12, 13);  //MEGA BOARD PINS RS,E,D4,D5,D6,D7
+
+tmElements_t tm;
+int PrevHH = 0;
+int PrevMI = 0;
+int PrevSS = 0;
+boolean AlarmStatus = false;
+String Mode = "CLOCK";
+int AlarmH1 = 0;
+int AlarmH2 = 0;
+int AlarmM1 = 0;
+int AlarmM2 = 0;
+boolean Blinkletter = false;
+long Currtime;
+int WeekDay = 0;
+
+int RelayPin = 9;
+int RelayPintwo = 8;
+int Led = 13;
+
+const byte ROWS = 4; //four rows
+const byte COLS = 3; //three columns
+char keys[ROWS][COLS] = {
+  {'1','2','3'},
+  {'4','5','6'},
+  {'7','8','9'},
+  {'*','0','#'}
+};
+byte rowPins[ROWS] = {2,3,4,5}; //connect to the row pinouts of the keypad
+byte colPins[COLS] = {6,7,8}; //connect to the column pinouts of the keypad
+
+
+Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
+
+
+void setup() {
+  Serial.begin(9600); //Turn on serial monitor
+  pinMode(RelayPin,OUTPUT);
+  pinMode(RelayPintwo,OUTPUT);
+  digitalWrite(RelayPin,HIGH);
+  digitalWrite(RelayPintwo,HIGH);
+  lcd.begin(20, 4);                        // set the lcd dimension
+  lcd.clear();                              // LCD screen clear
+}
+
+void loop() {
+    String PressedKey;
+       
+    Displaytime();
+   
+    char key = keypad.getKey();  
+    if (key){
+      PressedKey = String(key);
+      if ((Mode == "CLOCK") && (PressedKey == "#")) {
+        AlarmStatus = !AlarmStatus;
+      }  
+      if ((Mode == "CLOCK") && (PressedKey == "*")) {
+        Mode = "SET H1";
+      }
+
+      if ((PressedKey == "#") && (Mode == "SET H1" || Mode == "SET H2" || Mode == "SET M1" || Mode == "SET M2")) {
+        Mode = "CLOCK";
+        goto Endloop;
+      }  
+ 
+      if (Mode == "SET H1"){
+        if ((PressedKey == "0" || PressedKey == "1" || PressedKey == "2")){
+           AlarmH1 = PressedKey.toInt();
+           Mode = "SET H2";
+           goto Endloop;
+        }
+      }
+      
+      if (Mode == "SET H2"){
+        if (((AlarmH1 * 10) + PressedKey.toInt()) < 24){
+           AlarmH2 = PressedKey.toInt();
+           Mode = "SET M1";
+           goto Endloop;
+        }
+      }
+      
+      if (Mode == "SET M1"){
+        if (PressedKey == "0" || PressedKey == "1" || PressedKey == "2" || PressedKey == "3" || PressedKey == "4" || PressedKey == "5"){
+           AlarmM1 = PressedKey.toInt();
+           Mode = "SET M2";
+           goto Endloop;
+        }
+      }
+      
+      if (Mode == "SET M2"){
+        if (((AlarmM1 * 10) + PressedKey.toInt()) < 60){
+           AlarmM2 = PressedKey.toInt();
+           Mode = "SET H1";
+           goto Endloop;
+        }
+      }
+
+    }
+    
+
+Endloop:
+    if (AlarmStatus){
+      lcd.setCursor(0,3);
+      lcd.print("ALARM ON    ");
+    }
+    else{
+      lcd.setCursor(0,3);
+      lcd.print("ALARM OFF    ");
+      
+    }  
+   
+    Blink();
+    AlarmTrigger();
+    delay(100);
+}
+
+String print2digits(int number) {
+  String f = "";
+  if (number >= 0 && number < 10) {
+    f = "0";
+  }
+  f = f + String(number);
+  return f;
+}
+
+void Displaytime() {
+  
+  if (RTC.read(tm)) {
+    if ((PrevHH != tm.Hour) || (PrevMI != tm.Minute) || (PrevSS != tm.Second)) {
+      lcd.setCursor(0,0);
+      lcd.print(String(tm.Day) + "/" + String(tm.Month) + "/" + String(tmYearToCalendar(tm.Year)) + "        " );
+      lcd.setCursor(13,0);
+      WeekDay = tm.Wday;
+      lcd.print(GetDayDesc(tm.Wday));
+      lcd.setCursor(0,1);                       
+      lcd.print("    " + String(print2digits(tm.Hour)) + ":" + String(print2digits(tm.Minute)) + ":" + String(print2digits(tm.Second)));
+      PrevHH = tm.Hour;
+      PrevMI = tm.Minute;
+      PrevSS = tm.Second;
+    }  
+  }
+   else {
+    if (RTC.chipPresent()) {
+      lcd.clear();
+      lcd.print("Clock fail      ");    
+      lcd.setCursor(0,1);                       
+      lcd.print("Please set Time ");
+    } else {
+      lcd.clear();
+      lcd.print("Clock fail      ");    
+      lcd.setCursor(0,1);                       
+      lcd.print("Check wiring     ");
+    }
+    delay(100);
+  }
+}
+
+
+String GetDayDesc(int DAYNUM){
+  if (DAYNUM == 1) {return "SUN";} 
+  if (DAYNUM == 2) {return "MON";} 
+  if (DAYNUM == 3) {return "TUE";} 
+  if (DAYNUM == 4) {return "WED";} 
+  if (DAYNUM == 5) {return "THU";} 
+  if (DAYNUM == 6) {return "FRI";}
+  if (DAYNUM == 7) {return "SAT";} 
+  if (DAYNUM == 0) {return "   ";} 
+}
+
+void Blink(){
+  if(Mode == "CLOCK"){
+      lcd.setCursor(0,2);
+      lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+  }  
+
+  if((Mode == "SET H1") && (millis() > (Currtime + 300))){
+      lcd.setCursor(0,2);
+      Currtime = millis();
+      if(Blinkletter){
+         lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }
+      else{
+         lcd.print("ALARM TIME  " + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+         lcd.print(" ");
+         Blinkletter = !Blinkletter;
+      }  
+  }  
+
+
+  if((Mode == "SET H2") && (millis() > (Currtime + 300))){
+      lcd.setCursor(0,2);
+      Currtime = millis();
+      if(Blinkletter){
+         lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }
+      else{
+         lcd.print("ALARM TIME " + String(AlarmH1) + " :" + String(AlarmM1) + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }  
+  }
+ 
+  if((Mode == "SET M1") && (millis() > (Currtime + 300))){
+      lcd.setCursor(0,2);
+      Currtime = millis();
+      if(Blinkletter){
+         lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }
+      else{
+         lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ": " + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }  
+  }
+ 
+  if((Mode == "SET M2") && (millis() > (Currtime + 300))){
+      lcd.setCursor(0,2);
+      Currtime = millis();
+      if(Blinkletter){
+         lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + String(AlarmM2));
+         Blinkletter = !Blinkletter;
+      }
+      else{
+        lcd.print("ALARM TIME " + String(AlarmH1) + String(AlarmH2) + ":" + String(AlarmM1) + " ");
+         Blinkletter = !Blinkletter;
+      }  
+  }
+ 
+   
+}
+void AlarmTrigger(){
+  if (AlarmStatus){
+     if ((((AlarmH1 * 10) + AlarmH2) == PrevHH) && (((AlarmM1 * 10) + AlarmM2) == PrevMI) && (WeekDay == 0 || WeekDay == 1 || WeekDay == 2 ||WeekDay == 3 ||WeekDay == 4 ||WeekDay == 5 || WeekDay == 6)){
+        if (PrevSS >= 0 && PrevSS < 21){  
+           digitalWrite(RelayPin,HIGH);
+           digitalWrite(RelayPintwo,HIGH);
+        }
+        
+        else{  
+           digitalWrite(RelayPin,LOW);
+           digitalWrite(RelayPintwo,LOW);
+        }      
+     }
+     else{  
+        digitalWrite(RelayPin,LOW);
+        digitalWrite(RelayPintwo,LOW);
+     }
+  }
+  else{  
+     digitalWrite(RelayPin,LOW);
+     digitalWrite(RelayPintwo,LOW);
+  }
+}
